@@ -1479,41 +1479,120 @@ describe('AgentBrowserBridge', () => {
     }
   })
 
-  it('chunks large agent-browser type text before keyboard transport', async () => {
+  it('chunks large agent-browser type text through focused eval insertion', async () => {
     const text = ['y'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES), 'zz'].join('')
-    succeedWith({ typed: true })
+    succeedWith({ ok: true })
 
-    await bridge.type(text)
+    const result = await bridge.type(text)
 
-    const typeCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
+    const evalCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
+      const args = call[1] as string[]
+      return args.includes('eval')
+    })
+    const expressions = evalCalls.map((call: unknown[]) => {
+      const args = call[1] as string[]
+      return args[args.indexOf('eval') + 1]
+    })
+    const keyboardTypeCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
       const args = call[1] as string[]
       return args.includes('keyboard') && args.includes('type')
     })
-    const chunks = typeCalls.map((call: unknown[]) => {
-      const args = call[1] as string[]
-      return args[args.indexOf('type') + 1]
-    })
 
-    expect(chunks).toEqual(['y'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES), 'zz'])
+    expect(expressions).toHaveLength(2)
+    expect(expressions[0]).toContain('y'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES))
+    expect(expressions[1]).toContain('zz')
+    expect(keyboardTypeCalls).toHaveLength(0)
+    expect(result).toEqual({ typed: true })
   })
 
-  it('chunks large agent-browser keyboard insert text before transport', async () => {
+  it('chunks large keyboard insert text through focused eval insertion', async () => {
     const text = ['z'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES), 'qq'].join('')
-    succeedWith({ inserted: true })
+    succeedWith({ ok: true })
 
-    await bridge.keyboardInsertText(text)
+    const result = await bridge.keyboardInsertText(text)
 
-    const insertTextCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
+    const evalCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
+      const args = call[1] as string[]
+      return args.includes('eval')
+    })
+    const expressions = evalCalls.map((call: unknown[]) => {
+      const args = call[1] as string[]
+      return args[args.indexOf('eval') + 1]
+    })
+    const keyboardInsertCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
       const args = call[1] as string[]
       return args.includes('keyboard') && args.includes('inserttext')
     })
-    const chunks = insertTextCalls.map((call: unknown[]) => {
-      const args = call[1] as string[]
-      return args[args.indexOf('inserttext') + 1]
-    })
 
-    expect(chunks).toEqual(['z'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES), 'qq'])
+    expect(expressions).toHaveLength(2)
+    expect(expressions[0]).toContain('z'.repeat(AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES))
+    expect(expressions[1]).toContain('qq')
+    expect(keyboardInsertCalls).toHaveLength(0)
+    expect(result).toEqual({ inserted: true })
   })
+
+  it('selects focused element text via eval instead of keyboard shortcut', async () => {
+    succeedWith({ ok: true })
+
+    await bridge.selectAll('@textarea')
+
+    const commandArgs = execFileMock.mock.calls.map((call: unknown[]) => call[1] as string[])
+    const focusIndex = commandArgs.findIndex((args) => args.includes('focus'))
+    const evalIndex = commandArgs.findIndex((args) => args.includes('eval'))
+    expect(commandArgs.filter((args) => args.includes('focus'))).toHaveLength(1)
+    expect(commandArgs.filter((args) => args.includes('eval'))).toHaveLength(1)
+    expect(focusIndex).toBeGreaterThanOrEqual(0)
+    expect(evalIndex).toBe(focusIndex + 1)
+    expect(commandArgs[focusIndex]).toEqual(expect.arrayContaining(['focus', '@textarea']))
+    const expression = commandArgs[evalIndex][commandArgs[evalIndex].indexOf('eval') + 1]
+    expect(
+      execFileMock.mock.calls.some((call: unknown[]) => {
+        const args = call[1] as string[]
+        return args.includes('press') || args.includes('Control+a')
+      })
+    ).toBe(false)
+    expect(() => new Function(expression)).not.toThrow()
+  })
+
+  it('presses keys through focused eval instead of agent-browser press', async () => {
+    succeedWith({ ok: true })
+
+    await bridge.keypress('Enter')
+
+    const evalCalls = execFileMock.mock.calls.filter((call: unknown[]) => {
+      const args = call[1] as string[]
+      return args.includes('eval')
+    })
+    expect(evalCalls).toHaveLength(1)
+    const evalArgs = evalCalls[0][1] as string[]
+    const expression = evalArgs[evalArgs.indexOf('eval') + 1]
+    expect(
+      execFileMock.mock.calls.some((call: unknown[]) => {
+        const args = call[1] as string[]
+        return args.includes('press')
+      })
+    ).toBe(false)
+    expect(expression).toContain('"Enter"')
+    expect(() => new Function(expression)).not.toThrow()
+  })
+
+  it.each(['a', 'Space', 'Enter', 'Tab', 'Backspace', 'Delete', 'Control+a', 'Meta+a', 'Escape'])(
+    'builds valid keypress eval JavaScript for %s',
+    async (key) => {
+      succeedWith({ ok: true })
+
+      await bridge.keypress(key)
+
+      const evalCall = execFileMock.mock.calls.find((call: unknown[]) => {
+        const args = call[1] as string[]
+        return args.includes('eval')
+      })
+      expect(evalCall).toBeDefined()
+      const args = evalCall![1] as string[]
+      const expression = args[args.indexOf('eval') + 1]
+      expect(() => new Function(expression)).not.toThrow()
+    }
+  )
 
   // ── Cookie command arg building ──
 

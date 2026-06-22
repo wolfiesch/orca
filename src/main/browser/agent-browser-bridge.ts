@@ -137,6 +137,178 @@ function focusedTextInsertExpression(
   ].join('')
 }
 
+function focusedTextSelectAllExpression(): string {
+  return [
+    '(() => {',
+    ' const el = document.activeElement;',
+    " if (!el || el === document.body) { return { selected: false, reason: 'no-active-element' }; }",
+    " const isField = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';",
+    ' const isEditable =',
+    "   el.isContentEditable === true || (el.getAttribute && el.getAttribute('contenteditable') === 'true');",
+    " if (isField && typeof el.select === 'function') { el.select(); return { selected: true }; }",
+    " if (isEditable && typeof window.getSelection === 'function') {",
+    '   const selection = window.getSelection();',
+    '   if (selection) { selection.selectAllChildren(el); return { selected: true }; }',
+    ' }',
+    " return { selected: false, reason: 'unsupported-element' };",
+    ' })()'
+  ].join('')
+}
+
+function focusedKeypressExpression(keyExpression: string): string {
+  return [
+    '(() => {',
+    ' const originalKey = ',
+    keyExpression,
+    ';',
+    ' const modifierAliases = new Map([',
+    "   ['Command', 'Meta'], ['Cmd', 'Meta'], ['Ctrl', 'Control'], ['Option', 'Alt']",
+    ' ]);',
+    ' const parts = String(originalKey).split("+").filter(Boolean);',
+    ' const modifiers = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };',
+    ' let baseKey = parts.length ? parts[parts.length - 1] : String(originalKey);',
+    ' for (let index = 0; index < parts.length; index += 1) {',
+    '   const token = modifierAliases.get(parts[index]) || parts[index];',
+    '   if (index === parts.length - 1 && !["Meta", "Control", "Alt", "Shift"].includes(token)) {',
+    '     baseKey = token;',
+    '     continue;',
+    '   }',
+    '   if (token === "Meta") { modifiers.metaKey = true; }',
+    '   else if (token === "Control") { modifiers.ctrlKey = true; }',
+    '   else if (token === "Alt") { modifiers.altKey = true; }',
+    '   else if (token === "Shift") { modifiers.shiftKey = true; }',
+    ' }',
+    ' if (baseKey === "Return") { baseKey = "Enter"; }',
+    ' else if (baseKey === "Esc") { baseKey = "Escape"; }',
+    ' else if (baseKey === "Space") { baseKey = " "; }',
+    ' const el = document.activeElement;',
+    " if (!el || el === document.body) { return { pressed: originalKey, delivered: false, reason: 'no-active-element' }; }",
+    ' const isField =',
+    "   typeof el.value === 'string' && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');",
+    ' const isEditable =',
+    "   el.isContentEditable === true || (el.getAttribute && el.getAttribute('contenteditable') === 'true');",
+    ' const dispatchTextChange = () => {',
+    "   el.dispatchEvent(new Event('input', { bubbles: true }));",
+    "   el.dispatchEvent(new Event('change', { bubbles: true }));",
+    ' };',
+    ' const selectAll = () => {',
+    "   if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.select === 'function') {",
+    '     el.select();',
+    '     return true;',
+    '   }',
+    "   if (isEditable && typeof window.getSelection === 'function') {",
+    '     const selection = window.getSelection();',
+    '     if (selection) { selection.selectAllChildren(el); return true; }',
+    '   }',
+    '   return false;',
+    ' };',
+    ' const insertText = (value) => {',
+    '   let usedExecCommand = false;',
+    '   try { usedExecCommand = document.execCommand("insertText", false, value) === true; }',
+    '   catch (error) { usedExecCommand = false; }',
+    '   if (usedExecCommand) { return true; }',
+    '   if (isField) {',
+    '     const start = typeof el.selectionStart === "number" ? el.selectionStart : String(el.value ?? "").length;',
+    '     const end = typeof el.selectionEnd === "number" ? el.selectionEnd : start;',
+    '     const previous = String(el.value ?? "");',
+    '     const nextValue = previous.slice(0, start) + value + previous.slice(end);',
+    "     const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;",
+    '     if (nativeSetter) { nativeSetter.call(el, nextValue); } else { el.value = nextValue; }',
+    '     const caret = start + value.length;',
+    '     if (typeof el.setSelectionRange === "function") { el.setSelectionRange(caret, caret); }',
+    '     dispatchTextChange();',
+    '     return true;',
+    '   }',
+    '   if (isEditable) {',
+    '     el.textContent = String(el.textContent ?? "") + value;',
+    '     dispatchTextChange();',
+    '     return true;',
+    '   }',
+    '   return false;',
+    ' };',
+    ' const deleteFieldText = (forward) => {',
+    '   if (!isField) { return false; }',
+    '   const value = String(el.value ?? "");',
+    '   let start = typeof el.selectionStart === "number" ? el.selectionStart : value.length;',
+    '   let end = typeof el.selectionEnd === "number" ? el.selectionEnd : start;',
+    '   if (start === end) {',
+    '     if (forward) { end = Math.min(value.length, end + 1); }',
+    '     else { start = Math.max(0, start - 1); }',
+    '   }',
+    '   if (start === end) { return true; }',
+    '   const nextValue = value.slice(0, start) + value.slice(end);',
+    "   const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;",
+    '   if (nativeSetter) { nativeSetter.call(el, nextValue); } else { el.value = nextValue; }',
+    '   if (typeof el.setSelectionRange === "function") { el.setSelectionRange(start, start); }',
+    '   dispatchTextChange();',
+    '   return true;',
+    ' };',
+    ' const moveTabFocus = () => {',
+    '   const selector = \'a[href],button,input,textarea,select,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]\';',
+    '   const focusables = Array.from(document.querySelectorAll(selector)).filter((candidate) => {',
+    '     if (candidate.disabled) { return false; }',
+    '     if (candidate.getClientRects().length === 0) { return false; }',
+    '     return typeof candidate.focus === "function";',
+    '   });',
+    '   if (focusables.length === 0) { return false; }',
+    '   const currentIndex = focusables.indexOf(el);',
+    '   const nextIndex = modifiers.shiftKey',
+    '     ? (currentIndex <= 0 ? focusables.length - 1 : currentIndex - 1)',
+    '     : (currentIndex < 0 || currentIndex === focusables.length - 1 ? 0 : currentIndex + 1);',
+    '   focusables[nextIndex].focus();',
+    '   return true;',
+    ' };',
+    ' const keydown = new KeyboardEvent("keydown", {',
+    '   key: baseKey,',
+    '   bubbles: true,',
+    '   cancelable: true,',
+    '   metaKey: modifiers.metaKey,',
+    '   ctrlKey: modifiers.ctrlKey,',
+    '   altKey: modifiers.altKey,',
+    '   shiftKey: modifiers.shiftKey',
+    ' });',
+    ' const defaultAllowed = el.dispatchEvent(keydown) !== false;',
+    ' if (defaultAllowed) {',
+    '   const isPrintable = baseKey.length === 1;',
+    '   const hasTextModifier = modifiers.metaKey || modifiers.ctrlKey || modifiers.altKey;',
+    '   if (isPrintable && !hasTextModifier) {',
+    '     insertText(baseKey);',
+    '   } else if ((modifiers.metaKey || modifiers.ctrlKey) && baseKey.toLowerCase() === "a") {',
+    '     selectAll();',
+    '   } else if (baseKey === "Enter" && el.tagName === "INPUT" && el.form) {',
+    '     if (typeof el.form.requestSubmit === "function") { el.form.requestSubmit(); }',
+    '     else {',
+    '       const submitter = el.form.querySelector("button[type=submit],input[type=submit],button:not([type])");',
+    '       if (submitter && typeof submitter.click === "function") { submitter.click(); }',
+    '       else { el.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }',
+    '     }',
+    '   } else if (baseKey === "Enter" && (el.tagName === "TEXTAREA" || isEditable)) {',
+    '     let usedLineBreak = false;',
+    '     try { usedLineBreak = document.execCommand("insertLineBreak") === true; }',
+    '     catch (error) { usedLineBreak = false; }',
+    '     if (!usedLineBreak) { insertText("\\n"); }',
+    '   } else if (baseKey === "Tab") {',
+    '     moveTabFocus();',
+    '   } else if (baseKey === "Backspace") {',
+    '     if (!deleteFieldText(false) && isEditable) { document.execCommand("delete"); }',
+    '   } else if (baseKey === "Delete") {',
+    '     if (!deleteFieldText(true) && isEditable) { document.execCommand("forwardDelete"); }',
+    '   }',
+    ' }',
+    ' el.dispatchEvent(new KeyboardEvent("keyup", {',
+    '   key: baseKey,',
+    '   bubbles: true,',
+    '   cancelable: true,',
+    '   metaKey: modifiers.metaKey,',
+    '   ctrlKey: modifiers.ctrlKey,',
+    '   altKey: modifiers.altKey,',
+    '   shiftKey: modifiers.shiftKey',
+    ' }));',
+    ' return { pressed: originalKey, delivered: true };',
+    ' })()'
+  ].join('')
+}
+
 type AgentBrowserExecOptions = {
   envOverrides?: NodeJS.ProcessEnv
   timeoutMs?: number
@@ -829,7 +1001,10 @@ export class AgentBrowserBridge {
         input,
         AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES
       )) {
-        await this.execAgentBrowser(sessionName, ['keyboard', 'type', chunk])
+        await this.execAgentBrowser(sessionName, [
+          'eval',
+          focusedTextInsertExpression(JSON.stringify(chunk))
+        ])
       }
       return { typed: true } as BrowserTypeResult
     })
@@ -910,14 +1085,16 @@ export class AgentBrowserBridge {
   ): Promise<unknown> {
     await assertClipboardTextWriteWithinLimitWithYield(text)
     return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      let result: unknown = { inserted: true }
       for (const chunk of iterateBrowserTextInsertionChunks(
         text,
         AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES
       )) {
-        result = await this.execAgentBrowser(sessionName, ['keyboard', 'inserttext', chunk])
+        await this.execAgentBrowser(sessionName, [
+          'eval',
+          focusedTextInsertExpression(JSON.stringify(chunk))
+        ])
       }
-      return result
+      return { inserted: true }
     })
   }
 
@@ -1552,12 +1729,11 @@ export class AgentBrowserBridge {
     browserPageId?: string
   ): Promise<BrowserSelectAllResult> {
     return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      // Why: agent-browser has no select-all command — implement as focus + Ctrl+A
+      // Why: run selection inside the focused webview document; agent-browser
+      // keyboard shortcuts do not reliably reach Electron webviews.
       await this.execAgentBrowser(sessionName, ['focus', element])
-      return (await this.execAgentBrowser(sessionName, [
-        'press',
-        'Control+a'
-      ])) as BrowserSelectAllResult
+      await this.execAgentBrowser(sessionName, ['eval', focusedTextSelectAllExpression()])
+      return { selected: element } as BrowserSelectAllResult
     })
   }
 
@@ -1567,7 +1743,11 @@ export class AgentBrowserBridge {
     browserPageId?: string
   ): Promise<BrowserKeypressResult> {
     return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      return (await this.execAgentBrowser(sessionName, ['press', key])) as BrowserKeypressResult
+      await this.execAgentBrowser(sessionName, [
+        'eval',
+        focusedKeypressExpression(JSON.stringify(key))
+      ])
+      return { pressed: key } as BrowserKeypressResult
     })
   }
 
