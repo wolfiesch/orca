@@ -837,9 +837,12 @@ function App(): React.JSX.Element {
         // Load settings first so a persisted remote runtime does not boot against
         // the local filesystem and then hydrate stale local workspace state.
         await actions.fetchSettings()
-        await actions.fetchRepos()
-        await actions.fetchProjectGroups()
-        await actions.fetchFolderWorkspaces()
+        await Promise.all([
+          actions.fetchRepos(),
+          actions.fetchProjectGroups(),
+          actions.fetchFolderWorkspaces(),
+          actions.fetchKeybindings()
+        ])
         await actions.fetchAllWorktrees()
         await actions.fetchWorktreeLineage()
         const persistedUI = await window.api.ui.get()
@@ -856,7 +859,6 @@ function App(): React.JSX.Element {
           window.api.session,
           useAppStore.getState().repos
         )
-        await actions.fetchKeybindings()
         if (!cancelled) {
           actions.hydrateWorkspaceSession(session)
           actions.hydrateTabsSession(session)
