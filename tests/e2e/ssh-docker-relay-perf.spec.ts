@@ -1,3 +1,5 @@
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
@@ -23,6 +25,28 @@ type TypingMeasurement = {
   latencies: number[]
   medianLatencyMs: number
   worstLatencyMs: number
+}
+
+type SshRelayPerfSample = {
+  scenario: 'docker-ssh-relay-typing'
+  medianLatencyMs: number
+  worstLatencyMs: number
+  latencies: number[]
+}
+
+function appendSshRelayPerfSample(measurement: TypingMeasurement): void {
+  const jsonPath = process.env.ORCA_E2E_SSH_DOCKER_PERF_JSON
+  if (!jsonPath) {
+    return
+  }
+  mkdirSync(dirname(jsonPath), { recursive: true })
+  const sample: SshRelayPerfSample = {
+    scenario: 'docker-ssh-relay-typing',
+    medianLatencyMs: measurement.medianLatencyMs,
+    worstLatencyMs: measurement.worstLatencyMs,
+    latencies: measurement.latencies
+  }
+  appendFileSync(jsonPath, `${JSON.stringify(sample)}\n`)
 }
 
 type ConnectedDockerRemote = {
@@ -199,6 +223,7 @@ test.describe('Docker SSH relay perf', () => {
         type: 'docker-ssh-relay-typing',
         description: summary
       })
+      appendSshRelayPerfSample(measurement)
       expect(measurement.medianLatencyMs).toBeLessThan(MAX_MEDIAN_KEY_LATENCY_MS)
       expect(measurement.worstLatencyMs).toBeLessThan(MAX_WORST_KEY_LATENCY_MS)
       await stopRemoteLoad(orcaPage, ptyId)

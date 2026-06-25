@@ -94,6 +94,9 @@ const PTY_OUTPUT_BATCH_INTERVAL_MS = 8
 const PTY_OUTPUT_DRAIN_CONTINUE_MS = 1
 const PTY_OUTPUT_FLUSH_CHUNK_CHARS = 16 * 1024
 const PTY_OUTPUT_FLUSH_MAX_WRITES = 2
+const PTY_OUTPUT_FAST_BACKLOG_CHARS = 256 * 1024
+const PTY_OUTPUT_FAST_FLUSH_CHUNK_CHARS = 64 * 1024
+const PTY_OUTPUT_FAST_FLUSH_MAX_WRITES = 4
 const INTERACTIVE_OUTPUT_WINDOW_MS = 100
 const INTERACTIVE_OUTPUT_MAX_CHARS = 1024
 const INTERACTIVE_REDRAW_MAX_CHARS = PTY_OUTPUT_FLUSH_CHUNK_CHARS
@@ -359,14 +362,26 @@ export class PtyHandler {
 
   private flushPendingOutput(): void {
     this.outputFlushTimer = null
+    const pendingChars = Array.from(this.pendingOutputByPty.values()).reduce(
+      (total, pending) => total + pending.data.length,
+      0
+    )
+    const flushChunkChars =
+      pendingChars >= PTY_OUTPUT_FAST_BACKLOG_CHARS
+        ? PTY_OUTPUT_FAST_FLUSH_CHUNK_CHARS
+        : PTY_OUTPUT_FLUSH_CHUNK_CHARS
+    const flushMaxWrites =
+      pendingChars >= PTY_OUTPUT_FAST_BACKLOG_CHARS
+        ? PTY_OUTPUT_FAST_FLUSH_MAX_WRITES
+        : PTY_OUTPUT_FLUSH_MAX_WRITES
     let writes = 0
     for (const [id, pending] of Array.from(this.pendingOutputByPty.entries())) {
-      if (writes >= PTY_OUTPUT_FLUSH_MAX_WRITES) {
+      if (writes >= flushMaxWrites) {
         break
       }
       this.pendingOutputByPty.delete(id)
-      const chunk = pending.data.slice(0, PTY_OUTPUT_FLUSH_CHUNK_CHARS)
-      const remaining = pending.data.slice(PTY_OUTPUT_FLUSH_CHUNK_CHARS)
+      const chunk = pending.data.slice(0, flushChunkChars)
+      const remaining = pending.data.slice(flushChunkChars)
       if (remaining) {
         this.pendingOutputByPty.set(id, { data: remaining })
       }
