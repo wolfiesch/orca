@@ -761,7 +761,10 @@ describe('pane terminal output scheduler', () => {
     expect(terminal.write).toHaveBeenCalledTimes(16)
 
     vi.advanceTimersByTime(1)
-    expect(terminal.write).toHaveBeenCalledTimes(32)
+    expect(terminal.write).toHaveBeenCalledTimes(16)
+
+    vi.advanceTimersByTime(15)
+    expect(terminal.write).toHaveBeenCalledTimes(18)
   })
 
   it('caps hidden backlog memory and writes a warning instead of retaining all output', async () => {
@@ -831,6 +834,21 @@ describe('pane terminal output scheduler', () => {
     writeTerminalOutput(terminal, 'new', { foreground: true })
 
     expect(terminal.write.mock.calls.map(([data]) => data)).toEqual(['old', 'new'])
+  })
+
+  it('drains large background backlogs in 64 KiB chunks', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createTerminal()
+    const chunk = 'x'.repeat(16 * 1024)
+
+    for (let i = 0; i < 40; i++) {
+      writeTerminalOutput(terminal, chunk, { foreground: false })
+    }
+    vi.advanceTimersByTime(0)
+
+    expect(terminal.write.mock.calls[0]?.[0]).toHaveLength(64 * 1024)
+    expect(terminal.write.mock.calls[1]?.[0]).toHaveLength(64 * 1024)
   })
 
   it('yields instead of synchronously flushing a large hidden backlog on foreground output', async () => {
