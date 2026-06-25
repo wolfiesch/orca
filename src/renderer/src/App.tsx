@@ -849,9 +849,12 @@ function App(): React.JSX.Element {
         // Why: load local + every configured runtime environment (not just the
         // active one) so a cold start that restored a remote workspace doesn't
         // hide local repos. The sidebar "All hosts" scope then shows them all.
-        await actions.fetchReposForAllHosts()
-        await actions.fetchProjectGroupsForAllHosts()
-        await actions.fetchFolderWorkspacesForAllHosts()
+        await Promise.all([
+          actions.fetchReposForAllHosts(),
+          actions.fetchProjectGroupsForAllHosts(),
+          actions.fetchFolderWorkspacesForAllHosts(),
+          actions.fetchKeybindings()
+        ])
         await actions.fetchAllWorktrees()
         await actions.fetchWorktreeLineage()
         const persistedUI = await window.api.ui.get()
@@ -868,7 +871,6 @@ function App(): React.JSX.Element {
           window.api.session,
           useAppStore.getState().repos
         )
-        await actions.fetchKeybindings()
         if (!cancelled) {
           actions.hydrateWorkspaceSession(session)
           actions.hydrateTabsSession(session)

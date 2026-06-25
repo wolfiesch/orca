@@ -3,19 +3,33 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('renderer startup runtime routing', () => {
-  it('loads settings before repo and worktree hydration', () => {
+  it('loads settings before parallel repo hydration and worktrees after it', () => {
     const source = readFileSync(join(process.cwd(), 'src/renderer/src/App.tsx'), 'utf8')
     const startupBlockStart = source.indexOf('void (async () => {')
     const startupBlockEnd = source.indexOf('const persistedUI = await window.api.ui.get()')
     const startupBlock = source.slice(startupBlockStart, startupBlockEnd)
+    const settingsIndex = startupBlock.indexOf('await actions.fetchSettings()')
+    const parallelHydrationIndex = startupBlock.indexOf('await Promise.all([')
+    const allWorktreesIndex = startupBlock.indexOf('await actions.fetchAllWorktrees()')
+    const parallelHydrationEndIndex = startupBlock.indexOf('        ])', parallelHydrationIndex)
 
-    expect(startupBlock.indexOf('await actions.fetchSettings()')).toBeGreaterThanOrEqual(0)
-    expect(startupBlock.indexOf('await actions.fetchSettings()')).toBeLessThan(
-      startupBlock.indexOf('await actions.fetchReposForAllHosts()')
+    expect(settingsIndex).toBeGreaterThanOrEqual(0)
+    expect(parallelHydrationIndex).toBeGreaterThanOrEqual(0)
+    expect(startupBlock.indexOf('actions.fetchReposForAllHosts()', parallelHydrationIndex)).toBeLessThan(
+      parallelHydrationEndIndex
     )
-    expect(startupBlock.indexOf('await actions.fetchSettings()')).toBeLessThan(
-      startupBlock.indexOf('await actions.fetchAllWorktrees()')
+    expect(
+      startupBlock.indexOf('actions.fetchProjectGroupsForAllHosts()', parallelHydrationIndex)
+    ).toBeLessThan(parallelHydrationEndIndex)
+    expect(
+      startupBlock.indexOf('actions.fetchFolderWorkspacesForAllHosts()', parallelHydrationIndex)
+    ).toBeLessThan(parallelHydrationEndIndex)
+    expect(startupBlock.indexOf('actions.fetchKeybindings()', parallelHydrationIndex)).toBeLessThan(
+      parallelHydrationEndIndex
     )
+    expect(allWorktreesIndex).toBeGreaterThanOrEqual(0)
+    expect(settingsIndex).toBeLessThan(parallelHydrationIndex)
+    expect(parallelHydrationEndIndex).toBeLessThan(allWorktreesIndex)
   })
 
   it('waits for first-window startup services before terminal reconnect', () => {
