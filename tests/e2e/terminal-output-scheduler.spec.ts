@@ -170,7 +170,7 @@ async function mainSnapshotContains(page: Page, ptyId: string, text: string): Pr
 test.describe('Terminal output scheduler', () => {
   test('background tab output bursts use the shared drain while the active tab renders', async ({
     orcaPage
-  }) => {
+  }, testInfo) => {
     await waitForSessionReady(orcaPage)
     await waitForActiveWorktree(orcaPage)
     await ensureTerminalVisible(orcaPage)
@@ -214,6 +214,7 @@ test.describe('Terminal output scheduler', () => {
       command: nodeConsoleCommand(`'x'.repeat(50000) + ':BG_SCHED_${runId}_${index}'`)
     }))
 
+    const burstStartMs = performance.now()
     await sendPtyCommands(
       orcaPage,
       backgroundCommands.map(({ ptyId, command }) => ({ ptyId, command }))
@@ -231,7 +232,7 @@ test.describe('Terminal output scheduler', () => {
         message: 'Active terminal did not render foreground output during background bursts'
       })
       .toBe(true)
-
+    const foregroundMs = performance.now() - burstStartMs
     await expect
       .poll(
         async () => {
@@ -267,8 +268,12 @@ test.describe('Terminal output scheduler', () => {
         }
       )
       .toBe(true)
-
+    const drainMs = performance.now() - burstStartMs
     const debug = await getSchedulerDebug(orcaPage)
+    testInfo.annotations.push({
+      type: 'terminal-scheduler-burst',
+      description: `foregroundMs=${foregroundMs} drainMs=${drainMs} backgroundWrites=${debug.backgroundWriteCount} drainWrites=${debug.drainWrites.join(',')}`
+    })
     expect(debug.foregroundWriteCount).toBeGreaterThan(0)
     if (debug.drainWrites.length > 0) {
       expect(Math.max(...debug.drainWrites)).toBeLessThanOrEqual(2)

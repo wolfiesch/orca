@@ -66,6 +66,8 @@ const BACKGROUND_FLUSH_DELAY_MS = 50
 const BACKGROUND_DRAIN_INTERVAL_MS = 16
 const HIGH_PRIORITY_DRAIN_INTERVAL_MS = 1
 const BACKGROUND_CHUNK_CHARS = 16 * 1024
+const ADAPTIVE_BACKGROUND_CHUNK_CHARS = 64 * 1024
+const ADAPTIVE_BACKGROUND_CHUNK_THRESHOLD_CHARS = 512 * 1024
 const MAX_WRITES_PER_DRAIN = 2
 const HIGH_PRIORITY_MAX_WRITES_PER_DRAIN = 16
 const LARGE_BACKLOG_CHARS = 512 * 1024
@@ -647,8 +649,15 @@ function takeNextDrainableEntry(): QueueEntry | null {
   return null
 }
 
+function getBackgroundChunkChars(entry: QueueEntry): number {
+  return entry.queuedChars > ADAPTIVE_BACKGROUND_CHUNK_THRESHOLD_CHARS &&
+    entry.highPriority !== true
+    ? ADAPTIVE_BACKGROUND_CHUNK_CHARS
+    : BACKGROUND_CHUNK_CHARS
+}
+
 function writeQueuedChunk(entry: QueueEntry): 'foreground' | 'background' | null {
-  const queuedWrite = takeQueuedChunk(entry, BACKGROUND_CHUNK_CHARS)
+  const queuedWrite = takeQueuedChunk(entry, getBackgroundChunkChars(entry))
   if (!queuedWrite) {
     return null
   }
@@ -923,7 +932,7 @@ export function flushTerminalOutput(
   }
 
   let flushedChars = 0
-  let queuedWrite = takeQueuedChunk(entry, BACKGROUND_CHUNK_CHARS)
+  let queuedWrite = takeQueuedChunk(entry, getBackgroundChunkChars(entry))
   while (queuedWrite) {
     flushedChars += queuedWrite.data.length
     if (debugEnabled) {
@@ -957,7 +966,7 @@ export function flushTerminalOutput(
     if (options?.maxChars !== undefined && flushedChars >= options.maxChars) {
       break
     }
-    queuedWrite = takeQueuedChunk(entry, BACKGROUND_CHUNK_CHARS)
+    queuedWrite = takeQueuedChunk(entry, getBackgroundChunkChars(entry))
   }
   if (hasQueuedChunks(entry)) {
     entry.highPriority = true
