@@ -1,10 +1,17 @@
 import { spawnSync } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 const extraArgs = process.argv.slice(2)
+const playwrightArgs = extraArgs[0] === '--' ? extraArgs.slice(1) : extraArgs
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const env = {
   ...process.env,
   ORCA_E2E_SSH_DOCKER: '1'
+}
+
+if (process.env.ORCA_E2E_SSH_DOCKER_PERF_JSON) {
+  mkdirSync(dirname(process.env.ORCA_E2E_SSH_DOCKER_PERF_JSON), { recursive: true })
 }
 
 const runtime = spawnSync(pnpm, ['run', 'ensure:electron-runtime'], {
@@ -28,7 +35,7 @@ const result = spawnSync(
     '--project',
     'electron-headless',
     '--workers=1',
-    ...extraArgs
+    ...playwrightArgs
   ],
   {
     stdio: 'inherit',
