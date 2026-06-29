@@ -17,6 +17,10 @@ import type { ProjectExecutionRuntimeResolution } from '../shared/project-execut
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
 import type {
+  DictationOutputCapabilities,
+  DictationOutputControlSettings
+} from '../shared/dictation-output-settings'
+import type {
   FolderWorkspacePathStatus,
   FolderWorkspacePathStatusRequest
 } from '../shared/folder-workspace-path-status'
@@ -2754,6 +2758,11 @@ export type PreloadApi = {
     listRuntimeAccessGrants: () => Promise<{ grants: RuntimeAccessGrant[] }>
     revokeRuntimeAccess: (args: { deviceId: string }) => Promise<{ revoked: boolean }>
     isWebSocketReady: () => Promise<{ ready: boolean; endpoint: string | null }>
+  }
+  dictationOutput: {
+    getCapabilities: () => Promise<DictationOutputCapabilities>
+    apply: (sessionId: string, settings: DictationOutputControlSettings) => Promise<void>
+    restore: (sessionId: string) => Promise<void>
   }
   speech: {
     getCatalog: () => Promise<SpeechModelManifest[]>

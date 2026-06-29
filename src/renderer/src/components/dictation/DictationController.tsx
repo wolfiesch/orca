@@ -9,6 +9,10 @@ import { translate } from '@/i18n/i18n'
 import { showDictationStartErrorToast } from './dictation-start-error-toast'
 import { useHoldDictationGesture } from './use-hold-dictation-gesture'
 import { useDictationSpeechEvents } from './use-dictation-speech-events'
+import {
+  isDictationOutputControlEnabled,
+  toDictationOutputControlSettings
+} from '../../../../shared/dictation-output-settings'
 
 export function DictationController() {
   const dictationState = useAppStore((s) => s.dictationState)
@@ -44,9 +48,44 @@ export function DictationController() {
   const intentionalTargetCancellationRef = useRef(false)
   const insertedFinalTranscriptRef = useRef('')
   const partialTranscriptRef = useRef('')
+  const appliedOutputSessionIdsRef = useRef(new Set<string>())
+  const restoredOutputSessionIdsRef = useRef(new Set<string>())
 
   const drainStoppedSession = useCallback((sessionId: string) => {
     void waitForStoppedSession(sessionId, stoppedSessionIdsRef, stoppedResolversRef)
+  }, [])
+
+  const applyDictationOutputControl = useCallback(
+    async (sessionId: string) => {
+      const outputSettings = toDictationOutputControlSettings(settings?.voice ?? {})
+      if (!isDictationOutputControlEnabled(outputSettings)) {
+        return
+      }
+      try {
+        await window.api.dictationOutput.apply(sessionId, outputSettings)
+        appliedOutputSessionIdsRef.current.add(sessionId)
+        restoredOutputSessionIdsRef.current.delete(sessionId)
+      } catch {
+        // Best-effort output control must never block dictation startup.
+      }
+    },
+    [settings?.voice]
+  )
+
+  const restoreDictationOutputControl = useCallback(async (sessionId: string) => {
+    if (
+      !appliedOutputSessionIdsRef.current.has(sessionId) ||
+      restoredOutputSessionIdsRef.current.has(sessionId)
+    ) {
+      return
+    }
+    restoredOutputSessionIdsRef.current.add(sessionId)
+    appliedOutputSessionIdsRef.current.delete(sessionId)
+    try {
+      await window.api.dictationOutput.restore(sessionId)
+    } catch {
+      // Restore is best-effort; the main process also owns idempotent cleanup.
+    }
   }, [])
 
   const finishDictationSession = useCallback(
@@ -63,6 +102,7 @@ export function DictationController() {
       // transcript delivery is renderer IPC. Wait for this session's stopped
       // event so old finals cannot be mistaken for the next dictation run.
       await waitForStoppedSession(sessionId, stoppedSessionIdsRef, stoppedResolversRef)
+      await restoreDictationOutputControl(sessionId)
       const sessionErrored = erroredSessionIdsRef.current.delete(sessionId)
       if (!sessionErrored && !finalTranscriptReceivedRef.current && getCapturedChunkCount() > 0) {
         toast.message(
@@ -100,6 +140,7 @@ export function DictationController() {
       stopCapture,
       getCapturedChunkCount,
       clearRecoveryAudio,
+      restoreDictationOutputControl,
       setDictationNotice
     ]
   )
@@ -150,6 +191,7 @@ export function DictationController() {
     let captureStarted = false
 
     try {
+      await applyDictationOutputControl(sessionId)
       // Why: worker startup can take seconds after idle teardown. Capture first
       // and buffer locally so speech during "Starting..." is not discarded.
       await startCapture({ bufferAudio: true, sessionId })
@@ -161,6 +203,7 @@ export function DictationController() {
         discardBufferedAudio()
         stopCapture()
         insertionTargetRef.current = null
+        await restoreDictationOutputControl(sessionId)
         return
       }
 
@@ -174,6 +217,7 @@ export function DictationController() {
         stopCapture()
         await window.api.speech.stopDictation(sessionId).catch(() => undefined)
         drainStoppedSession(sessionId)
+        await restoreDictationOutputControl(sessionId)
         return
       }
 
@@ -184,6 +228,7 @@ export function DictationController() {
         stopCapture()
         await window.api.speech.stopDictation(sessionId).catch(() => undefined)
         drainStoppedSession(sessionId)
+        await restoreDictationOutputControl(sessionId)
         return
       }
       if (stopRequestedDuringStartRef.current) {
@@ -196,6 +241,7 @@ export function DictationController() {
       recordFeatureInteraction('voice-dictation')
     } catch (err) {
       if (dictationRunRef.current !== runId) {
+        await restoreDictationOutputControl(sessionId)
         return
       }
       await window.api.speech.stopDictation(sessionId).catch(() => undefined)
@@ -204,6 +250,7 @@ export function DictationController() {
         stopCapture()
       }
       discardBufferedAudio()
+      await restoreDictationOutputControl(sessionId)
       const message = String(err)
       insertionTargetRef.current = null
       intentionalTargetCancellationRef.current = false
@@ -248,6 +295,8 @@ export function DictationController() {
     resetDictationMeter,
     clearDictationNotice,
     clearRecoveryAudio,
+    applyDictationOutputControl,
+    restoreDictationOutputControl,
     setDictationNotice
   ])
 
@@ -273,6 +322,15 @@ export function DictationController() {
 
   // Toggle mode: use IPC from main process (before-input-event intercepts
   // the keyDown so Cmd+E doesn't reach xterm or trigger system shortcuts).
+  useEffect(() => {
+    return () => {
+      const sessionId = activeSessionIdRef.current
+      if (sessionId) {
+        void restoreDictationOutputControl(sessionId)
+      }
+    }
+  }, [restoreDictationOutputControl])
+
   useEffect(() => {
     const mode = settings?.voice?.dictationMode ?? 'toggle'
     if (mode !== 'toggle') {
@@ -334,6 +392,7 @@ export function DictationController() {
     stopCapture,
     getRecoveryAudioChunks,
     clearRecoveryAudio,
+    restoreDictationOutput: restoreDictationOutputControl,
     setDictationNotice
   })
 
